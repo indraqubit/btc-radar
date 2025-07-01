@@ -59,5 +59,4 @@ elif funding < -0.08 and oi_change > 3:
 
 # --- Refresh Button ---
 if st.button("🔄 Refresh Data"):
-    st.session_state['baseline_oi'] = oi
-    st.experimental_rerun()
+    st.session_state.clear()
