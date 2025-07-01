@@ -1,62 +1,64 @@
 import streamlit as st
 import requests
+import pandas as pd
+import matplotlib.pyplot as plt
+from datetime import datetime
+import os
 
-st.set_page_config(page_title="BTC Market Manipulation Radar")
-
-# --- Kraken Futures API ---
-def get_kraken_funding_oi(symbol="PI_XBTUSD"):
-    url = "https://futures.kraken.com/derivatives/api/v3/tickers"
-    try:
-        res = requests.get(url, timeout=5)
-        if res.ok:
-            tickers = res.json().get("tickers", [])
-            row = next((x for x in tickers if x.get("symbol") == symbol), None)
-            if row:
-                return float(row.get("fundingRate", 0.0)) * 100, float(row.get("openInterest", 0.0))
-    except Exception as e:
-        st.warning(f"⚠️ Kraken API error: {e}")
-    return 0.0, 0.0
-
+# ----------------------
+# Function to get BTC price from CoinGecko
+# ----------------------
 def get_price():
-    url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
     try:
-        res = requests.get(url, timeout=5)
-        if res.ok:
-            return res.json().get("bitcoin", {}).get("usd", 0.0)
-    except Exception as e:
-        st.warning(f"⚠️ CoinGecko error: {e}")
-    return 0.0
+        res = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd")
+        return res.json()['bitcoin']['usd']
+    except:
+        return 0
 
-# --- UI Layout ---
-st.title("📡 BTC Market Manipulation Radar")
-st.success("✅ Bisa connect ke CoinGecko!")
+# ----------------------
+# Save price + timestamp to CSV
+# ----------------------
+def log_price(price):
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    file = "btc_price_log.csv"
+    with open(file, "a") as f:
+        f.write(f"{now},{price}\n")
 
-# --- Pull Data ---
-funding, oi = get_kraken_funding_oi()
+# ----------------------
+# Load price history
+# ----------------------
+def load_data():
+    file = "btc_price_log.csv"
+    if not os.path.exists(file):
+        return pd.DataFrame(columns=["time", "price"])
+    df = pd.read_csv(file, names=["time", "price"], parse_dates=["time"])
+    return df.tail(100)  # show last 100 records
+
+# ----------------------
+# Streamlit UI
+# ----------------------
+st.set_page_config(page_title="BTC Radar", layout="centered")
+st.title("📡 BTC Price Tracker")
+
 price = get_price()
+if price > 0:
+    st.success(f"Current BTC Price: ${price:,.2f}")
+    log_price(price)
+else:
+    st.error("⚠️ Failed to fetch price")
 
-# --- State Management ---
-if 'baseline_oi' not in st.session_state:
-    st.session_state['baseline_oi'] = oi
+# Load & plot
+st.subheader("📈 BTC Price History")
+data = load_data()
+if not data.empty:
+    fig, ax = plt.subplots()
+    ax.plot(data["time"], data["price"], color='orange', marker='o')
+    ax.set_xlabel("Time")
+    ax.set_ylabel("Price (USD)")
+    ax.grid(True)
+    st.pyplot(fig)
+else:
+    st.warning("No data to display yet.")
 
-oi_change = 100 * ((oi - st.session_state['baseline_oi']) / st.session_state['baseline_oi']) if st.session_state['baseline_oi'] > 0 else 0.0
-
-# --- Display Metrics ---
-st.markdown("### BTC Price")
-st.markdown(f"<h1 style='font-size: 3.5rem;'>${price:,.2f}</h1>", unsafe_allow_html=True)
-
-st.markdown("### Funding Rate")
-st.markdown(f"<h1 style='font-size: 2.5rem;'>{funding:.4f} %</h1>", unsafe_allow_html=True)
-
-st.markdown("### Open Interest Change")
-st.markdown(f"<h1 style='font-size: 2.5rem;'>{oi_change:.2f} %</h1>", unsafe_allow_html=True)
-
-# --- Manipulation Warning ---
-if funding > 0.08 and oi_change > 3:
-    st.error("🚨 Potential LONG Squeeze Detected")
-elif funding < -0.08 and oi_change > 3:
-    st.error("🚨 Potential SHORT Squeeze Detected")
-
-# --- Refresh Button ---
-if st.button("🔄 Refresh Data"):
-    st.session_state.clear()
+if st.button("🔄 Refresh Now"):
+    st.rerun()
